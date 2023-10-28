@@ -1,48 +1,59 @@
-import Clock from './deps/clock.js';
+import Clock from "./deps/clock.js";
+import View from "./view.js";
 
-const fileUpload = document.getElementById('fileUpload')
-const btnUploadVideo = document.getElementById('btnUploadVideos')
-const fileSize = document.getElementById('fileSize')
-const fileInfo = document.getElementById('fileInfo')
-const txtfileName = document.getElementById('fileName')
-const fileUploadWrapper = document.getElementById('fileUploadWrapper')
-const elapsed = document.getElementById('elapsed')
+const clock = new Clock();
+const view = new View();
 
+const worker = new Worker("src/worker/worker.js", {
+  type: "module",
+});
 
-fileUpload.addEventListener('change', onChange)
-btnUploadVideo.addEventListener('click', () => {
-    // trigger file input
-    fileUpload.click()
-})
-let took = ''
+worker.onerror = (error) => {
+  console.error("worker error", error);
+};
 
-function parseBytesIntoMBAndGB(bytes) {
-    const mb = bytes / (1024 * 1024)
-    // if mb is greater than 1024, then convert to GB
-    if (mb > 1024) {
-        // rount to 2 decimal places
-        return `${Math.round(mb / 1024)}GB`
-    }
-    return `${Math.round(mb)}MB`
-}
-const clock = new Clock()
+worker.onmessage = ({ data }) => {
+  if (data.status !== "done") return;
 
-function onChange(e) {
-    const file = e.target.files[0]
-    const { name, size } = file
-    txtfileName.innerText = name
-    fileSize.innerText = parseBytesIntoMBAndGB(size)
+  clock.stop();
+  view.updateElapsedTime(`Process took ${took.replace("ago", "")}`);
 
-    fileInfo.classList.remove('hide')
-    fileUploadWrapper.classList.add('hide')
+  if (!data.buffer) return;
+  view.downloadBlobAsFile(data.buffer, data.fileName);
+};
 
-    clock.start((time) => {
-        took = time;
-        elapsed.innerText = `Process started ${time}`
-    })
+let took = "";
+view.configureOnFileChange((file) => {
+  const canvas = view.getCanvas();
+  worker.postMessage(
+    {
+      file,
+      canvas,
+    },
+    [canvas]
+  );
 
-    setTimeout(() => {
-        clock.stop()
-        elapsed.innerText = `Process took ${took.replace('ago', '')}`
-    }, 5000)
+  clock.start((time) => {
+    took = time;
+    view.updateElapsedTime(`Process started ${time}`);
+  });
+});
+
+async function fakeFetch() {
+  const filePath = "/videos/frag_bunny.mp4";
+  const response = await fetch(filePath);
+  /*const response = await fetch(filePath, {
+    method: "HEAD",
+  });
+  // traz o tamanho do arquivo!
+  response.headers.get("content-length");*/
+
+  const file = new File([await response.blob()], filePath, {
+    type: "video/mp4",
+    lastModified: Date.now(),
+  });
+
+  const event = new Event("change");
+  Reflect.defineProperty(event, "target", { value: { files: [file] } });
+  document.getElementById("fileUpload").dispatchEvent(event);
 }
